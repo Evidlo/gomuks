@@ -162,7 +162,9 @@ func (msg *FileMessage) CalculateBuffer(prefs config.UserPreferences, width int,
 		return
 	}
 
-	msg.buffer = ansFile.Render()
+	// msg.buffer = ansFile.Render()
+	_ = ansFile
+	msg.buffer = []tstring.TString{tstring.NewTString("\x1b_Gm=0,a=T,f=100;iVBORw0KGgoAAAANSUhEUgAAAAgAAAAFCAMAAABPT11nAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAe1BMVEX29vPZ39PS2M6+2Nuly8as0cfD1MzX19Dr7NF2h3OAh3ehtKOSv6mlu6WroYW2qY63x6V7iHMvPDVKVk1YY15lZ2KYln+1s5zV29C0t6lxdGRLUUJ0fW+upYu1mnXYv5n18u/b2M/a08PMxbLR0cTjzrPEgyrImV////8XrkpeAAAAAWJLR0QovbC1sgAAAAd0SU1FB+YECQcHE0rxeukAAAA1SURBVAjXY2BgZGJmYWVjZ+Dg5OLm4eXjZxAQFBIWERUTZ5CQlJKWkZWTZ1BQVFJWUVVTBwAtaQMNlD2X1QAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAyMC0wOS0xMlQwNTozNTo1NiswMDowMJsNMAcAAAAldEVYdGRhdGU6bW9kaWZ5ADIwMTgtMTEtMTdUMDc6Mjc6MTcrMDA6MDC0c9OrAAAAAElFTkSuQmCC\x1b\\")}
 }
 
 func (msg *FileMessage) Height() int {
