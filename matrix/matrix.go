@@ -1088,6 +1088,17 @@ func (c *Container) UploadMedia(path string, encrypt bool) (*ifc.UploadedMediaIn
 	uploadFileName := stat.Name()
 	uploadMimeType := info.MimeType
 
+	// Ensure filename has proper extension for Element's MIME type validation
+	// (added in Element v1.11.85 for security)
+	if !strings.Contains(uploadFileName, ".") {
+		ext := getExtensionForMimeType(uploadMimeType)
+		debug.Printf("Adding extension to %q for mimetype %q: %q", uploadFileName, uploadMimeType, ext)
+		if ext != "" {
+			uploadFileName = uploadFileName + ext
+		}
+	}
+	debug.Printf("Final uploadFileName: %q", uploadFileName)
+
 	var content io.Reader
 	var encryptionInfo *attachment.EncryptedFile
 	if encrypt {
@@ -1110,10 +1121,17 @@ func (c *Container) UploadMedia(path string, encrypt bool) (*ifc.UploadedMediaIn
 		return nil, err
 	}
 
+	// Use uploadFileName for the message body to include extension if it was added
+	bodyName := uploadFileName
+	if encrypt {
+		// For encrypted files, uploadFileName is emptied, so use original stat.Name()
+		bodyName = stat.Name()
+	}
+
 	return &ifc.UploadedMediaInfo{
 		RespMediaUpload: resp,
 		EncryptionInfo:  encryptionInfo,
-		Name:            stat.Name(),
+		Name:            bodyName,
 		MsgType:         msgtype,
 		Info:            &info,
 	}, nil

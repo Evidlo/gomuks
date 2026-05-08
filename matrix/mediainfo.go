@@ -104,3 +104,40 @@ func getMediaInfo(path string) (msgtype event.MessageType, info event.FileInfo, 
 
 	return
 }
+
+// getExtensionForMimeType returns the file extension for a given MIME type.
+// Used to ensure filenames have proper extensions for Element's MIME type validation.
+func getExtensionForMimeType(mimeType string) string {
+	switch mimeType {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "image/bmp":
+		return ".bmp"
+	case "image/svg+xml":
+		return ".svg"
+	case "video/mp4":
+		return ".mp4"
+	case "video/webm":
+		return ".webm"
+	case "video/quicktime":
+		return ".mov"
+	case "audio/mpeg":
+		return ".mp3"
+	case "audio/wav":
+		return ".wav"
+	case "audio/ogg":
+		return ".ogg"
+	case "application/pdf":
+		return ".pdf"
+	case "application/zip":
+		return ".zip"
+	default:
+		return ""
+	}
+}
