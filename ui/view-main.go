@@ -257,7 +257,7 @@ func (view *MainView) switchRoom(tag string, room *rooms.Room, lock bool) {
 	roomView.Update()
 	view.roomView.SetInnerComponent(roomView)
 	view.currentRoom = roomView
-	view.MarkRead(roomView)
+	view.BumpFocus(roomView)
 	view.roomList.SetSelected(tag, room)
 	view.flex.SetFocused(view.roomView)
 	view.focused = view.roomView
@@ -409,12 +409,12 @@ func (view *MainView) NotifyMessage(room *rooms.Room, message ifc.Message, shoul
 	isCurrent := room == view.roomList.SelectedRoom()
 	// Whether or not the terminal window is focused.
 	recentlyFocused := time.Now().Add(-30 * time.Second).Before(view.lastFocusTime)
-	isFocused := time.Now().Add(-5 * time.Second).Before(view.lastFocusTime)
 
-	if !isCurrent || !isFocused {
+	if !isCurrent {
 		// The message is not in the current room, show new message status in room list.
 		room.AddUnread(message.ID(), should.Notify, should.Highlight)
 	} else {
+		room.MarkRead(message.ID())
 		view.matrix.MarkRead(room.ID, message.ID())
 	}
 
@@ -459,5 +459,6 @@ func (view *MainView) LoadHistory(roomID id.RoomID) {
 	for _, evt := range history {
 		roomView.AddHistoryEvent(evt)
 	}
+	view.MarkRead(roomView)
 	view.parent.Render()
 }

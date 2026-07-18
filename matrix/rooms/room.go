@@ -282,9 +282,12 @@ func (room *Room) MarkRead(eventID id.EventID) bool {
 	}
 	if readToIndex >= 0 {
 		room.UnreadMessages = room.UnreadMessages[readToIndex+1:]
-		room.highlightCache = nil
-		room.unreadCountCache = nil
+	} else if len(room.UnreadMessages) > 0 {
+		debug.Printf("MarkRead(%s) not found in UnreadMessages, clearing %d unreads", eventID, len(room.UnreadMessages))
+		room.UnreadMessages = nil
 	}
+	room.highlightCache = nil
+	room.unreadCountCache = nil
 	return true
 }
 
