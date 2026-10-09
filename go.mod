@@ -49,3 +49,4 @@ require (
 )
 
 replace github.com/mattn/go-runewidth => github.com/tulir/go-runewidth v0.0.14-0.20221113132156-dc2fc6d28246
+replace maunium.net/go/mautrix => ./third_party/mautrix

@@ -32,6 +32,7 @@ import (
 
 	"maunium.net/go/gomuks/config"
 	"maunium.net/go/gomuks/debug"
+	"maunium.net/go/gomuks/matrix/sascompat"
 )
 
 type EmojiView struct {
@@ -80,7 +81,11 @@ type VerificationModal struct {
 	progressMax int
 	stopWaiting chan struct{}
 	confirmChan chan bool
+	cancelled   chan struct{}
 	done        bool
+
+	// Cancel aborts the verification transaction when the modal is dismissed with the cancel keybinding.
+	Cancel func()
 
 	parent *MainView
 }
@@ -89,8 +94,9 @@ func NewVerificationModal(mainView *MainView, device *crypto.DeviceIdentity, tim
 	vm := &VerificationModal{
 		parent:      mainView,
 		device:      device,
-		stopWaiting: make(chan struct{}),
+		stopWaiting: make(chan struct{}, 1),
 		confirmChan: make(chan bool),
+		cancelled:   make(chan struct{}),
 		done:        false,
 	}
 
@@ -126,6 +132,25 @@ func NewVerificationModal(mainView *MainView, device *crypto.DeviceIdentity, tim
 	go vm.decrementWaitingBar()
 
 	return vm
+}
+
+// setupVerification makes requests from our own devices open a verification modal automatically.
+// Requests from other users are ignored rather than rejected, so they can still be answered from another client.
+func (view *MainView) setupVerification() {
+	mach, ok := view.matrix.Crypto().(*crypto.OlmMachine)
+	if !ok {
+		return
+	}
+	mach.DefaultSASTimeout = 120 * time.Second
+	compat := sascompat.For(mach)
+	mach.AcceptVerificationFrom = compat.AcceptFrom(func(txnID string, device *crypto.DeviceIdentity) crypto.VerificationHooks {
+		modal := NewVerificationModal(view, device, mach.DefaultSASTimeout)
+		modal.infoText.SetText(fmt.Sprintf("Accepted verification request\nfrom %s (%s)", device.Name, device.DeviceID))
+		modal.Cancel = func() { compat.Cancel(txnID) }
+		view.ShowModal(modal)
+		view.parent.Render()
+		return modal
+	})
 }
 
 func (vm *VerificationModal) decrementWaitingBar() {
@@ -172,7 +197,12 @@ func (vm *VerificationModal) VerifySASMatch(device *crypto.DeviceIdentity, data 
 	vm.emojiText.Data = data
 	vm.parent.parent.Render()
 	vm.progress = vm.progressMax
-	confirm := <-vm.confirmChan
+	var confirm bool
+	select {
+	case confirm = <-vm.confirmChan:
+	case <-vm.cancelled:
+		return false
+	}
 	vm.progress = vm.progressMax
 	vm.emojiText.Data = nil
 	vm.infoText.SetText(fmt.Sprintf("Waiting for %s\nto confirm", vm.device.UserID))
@@ -189,7 +219,10 @@ func (vm *VerificationModal) OnCancel(cancelledByUs bool, reason string, _ event
 		vm.infoText.SetText(fmt.Sprintf("Verification cancelled by %s: %s", vm.device.UserID, reason))
 	}
 	vm.inputBar.SetPlaceholder("Press enter to close the dialog")
-	vm.stopWaiting <- struct{}{}
+	select {
+	case vm.stopWaiting <- struct{}{}:
+	default:
+	}
 	vm.done = true
 	vm.parent.parent.Render()
 }
@@ -199,7 +232,10 @@ func (vm *VerificationModal) OnSuccess() {
 	vm.parent.parent.app.SetRedrawTicker(1 * time.Minute)
 	vm.infoText.SetText(fmt.Sprintf("Successfully verified %s (%s) of %s", vm.device.Name, vm.device.DeviceID, vm.device.UserID))
 	vm.inputBar.SetPlaceholder("Press enter to close the dialog")
-	vm.stopWaiting <- struct{}{}
+	select {
+	case vm.stopWaiting <- struct{}{}:
+	default:
+	}
 	vm.done = true
 	vm.parent.parent.Render()
 	if vm.parent.config.SendToVerifiedOnly {
@@ -220,6 +256,15 @@ func (vm *VerificationModal) OnKeyEvent(event mauview.KeyEvent) bool {
 			return true
 		}
 		return false
+	} else if vm.parent.config.Keybindings.Modal[kb] == "cancel" {
+		debug.Print("Cancelling verification")
+		vm.done = true
+		close(vm.cancelled)
+		if vm.Cancel != nil {
+			go vm.Cancel()
+		}
+		vm.parent.HideModal()
+		return true
 	} else if vm.emojiText.Data == nil {
 		debug.Print("Ignoring pre-emoji key event")
 		return false

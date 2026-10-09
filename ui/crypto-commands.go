@@ -23,16 +23,20 @@ import (
 	"fmt"
 	"io/ioutil"
 	"path/filepath"
+	"sort"
 	"strings"
+	"text/tabwriter"
 	"time"
 	"unicode"
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/crypto"
 	"maunium.net/go/mautrix/crypto/ssss"
+	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
 	ifc "maunium.net/go/gomuks/interface"
+	"maunium.net/go/gomuks/matrix/sascompat"
 )
 
 func autocompleteDeviceUserID(cmd *CommandAutocomplete) (completions []string, newText string) {
@@ -194,15 +198,7 @@ func cmdVerifyDevice(cmd *Command) {
 		return
 	}
 	if len(cmd.Args) == 2 {
-		mach := cmd.Matrix.Crypto().(*crypto.OlmMachine)
-		mach.DefaultSASTimeout = 120 * time.Second
-		modal := NewVerificationModal(cmd.MainView, device, mach.DefaultSASTimeout)
-		cmd.MainView.ShowModal(modal)
-		_, err := mach.NewSimpleSASVerificationWith(device, modal)
-		if err != nil {
-			cmd.Reply("Failed to start interactive verification: %v", err)
-			return
-		}
+		startDeviceVerification(cmd, device)
 	} else {
 		fingerprint := strings.Join(cmd.Args[2:], "")
 		if string(device.SigningKey) != fingerprint {
@@ -224,9 +220,140 @@ func cmdVerifyDevice(cmd *Command) {
 	}
 }
 
+func ownDevices(cmd *Command) []*crypto.DeviceIdentity {
+	mach := cmd.Matrix.Crypto().(*crypto.OlmMachine)
+	userID := cmd.Matrix.Client().UserID
+	devices := mach.LoadDevices(userID)
+	if devices == nil {
+		devices, _ = mach.CryptoStore.GetDevices(userID)
+	}
+	list := make([]*crypto.DeviceIdentity, 0, len(devices))
+	for _, device := range devices {
+		list = append(list, device)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].Name+string(list[i].DeviceID) < list[j].Name+string(list[j].DeviceID)
+	})
+	return list
+}
+
+func autocompleteVerify(cmd *CommandAutocomplete) ([]string, string) {
+	if len(cmd.Args) != 1 || unicode.IsSpace(rune(cmd.RawArgs[len(cmd.RawArgs)-1])) {
+		return []string{}, ""
+	} else if strings.HasPrefix(cmd.Args[0], "@") {
+		return autocompleteDeviceUserID(cmd)
+	}
+	mach := cmd.Matrix.Crypto().(*crypto.OlmMachine)
+	devices, err := mach.CryptoStore.GetDevices(cmd.Matrix.Client().UserID)
+	if err != nil {
+		return []string{}, ""
+	}
+	prefix := strings.ToUpper(cmd.Args[0])
+	var completions []string
+	var completedDeviceID id.DeviceID
+	for _, device := range devices {
+		if device.DeviceID == cmd.Matrix.Client().DeviceID {
+			continue
+		} else if strings.HasPrefix(strings.ToUpper(string(device.DeviceID)), prefix) || strings.HasPrefix(strings.ToUpper(device.Name), prefix) {
+			completedDeviceID = device.DeviceID
+			completions = append(completions, fmt.Sprintf("%s (%s)", device.DeviceID, device.Name))
+		}
+	}
+	if len(completions) == 1 {
+		return nil, fmt.Sprintf("/%s %s", cmd.OrigCommand, completedDeviceID)
+	}
+	return completions, ""
+}
+
+func cmdVerifyList(cmd *Command) {
+	mach := cmd.Matrix.Crypto().(*crypto.OlmMachine)
+	devices := ownDevices(cmd)
+	if len(devices) == 0 {
+		cmd.Reply("No devices found for %s", cmd.Matrix.Client().UserID)
+		return
+	}
+	lastSeen := make(map[id.DeviceID]mautrix.RespDeviceInfo)
+	if info, err := cmd.Matrix.Client().GetDevicesInfo(); err == nil {
+		for _, d := range info.Devices {
+			lastSeen[d.DeviceID] = d
+		}
+	}
+	sort.SliceStable(devices, func(i, j int) bool {
+		return lastSeen[devices[i].DeviceID].LastSeenTS > lastSeen[devices[j].DeviceID].LastSeenTS
+	})
+	var buf strings.Builder
+	table := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(table, "  ID\tName\tTrust\tLast seen\tIP")
+	for _, device := range devices {
+		trust := device.Trust.String()
+		if device.Trust == crypto.TrustStateUnset {
+			trust = "unverified"
+			if mach.IsDeviceTrusted(device) {
+				trust = "cross-signed"
+			}
+		}
+		marker := " "
+		if device.DeviceID == cmd.Matrix.Client().DeviceID {
+			marker = "*"
+			trust = "this device"
+		}
+		name := []rune(device.Name)
+		if len(name) > 30 {
+			name = append(name[:29], '…')
+		}
+		info := lastSeen[device.DeviceID]
+		seen := "never"
+		if info.LastSeenTS > 0 {
+			seen = time.UnixMilli(info.LastSeenTS).Format("2006-01-02 15:04")
+		}
+		_, _ = fmt.Fprintf(table, "%s %s\t%s\t%s\t%s\t%s\n", marker, device.DeviceID, string(name), trust, seen, info.LastSeenIP)
+	}
+	_ = table.Flush()
+	cmd.Reply("%sUse /verify <device id> to start emoji verification", buf.String())
+}
+
 func cmdVerify(cmd *Command) {
+	if len(cmd.Args) == 0 || cmd.Args[0] == "list" {
+		cmdVerifyList(cmd)
+		return
+	} else if strings.HasPrefix(cmd.Args[0], "@") {
+		cmdVerifyUser(cmd)
+		return
+	}
+	var device *crypto.DeviceIdentity
+	for _, d := range ownDevices(cmd) {
+		if strings.EqualFold(string(d.DeviceID), cmd.Args[0]) {
+			device = d
+			break
+		}
+	}
+	if device == nil {
+		cmd.Reply("Device %s not found. Use /verify list to see your devices", cmd.Args[0])
+		return
+	} else if device.DeviceID == cmd.Matrix.Client().DeviceID {
+		cmd.Reply("That's this device")
+		return
+	}
+	startDeviceVerification(cmd, device)
+}
+
+func startDeviceVerification(cmd *Command, device *crypto.DeviceIdentity) {
+	mach := cmd.Matrix.Crypto().(*crypto.OlmMachine)
+	compat := sascompat.For(mach)
+	modal := NewVerificationModal(cmd.MainView, device, mach.DefaultSASTimeout)
+	cmd.MainView.ShowModal(modal)
+	txnID, err := compat.Request(device, modal)
+	if err != nil {
+		cmd.MainView.HideModal()
+		cmd.Reply("Failed to start interactive verification: %v", err)
+		return
+	}
+	modal.Cancel = func() { compat.Cancel(txnID) }
+}
+
+func cmdVerifyUser(cmd *Command) {
 	if len(cmd.Args) < 1 {
-		cmd.Reply("Usage: /%s <user ID> [--force]", cmd.OrigCommand)
+		cmd.Reply("Usage: /%s @user:server [--force]", cmd.OrigCommand)
 		return
 	}
 	force := len(cmd.Args) >= 2 && strings.ToLower(cmd.Args[1]) == "--force"
@@ -248,10 +375,14 @@ func cmdVerify(cmd *Command) {
 		return
 	}
 	modal := NewVerificationModal(cmd.MainView, &crypto.DeviceIdentity{UserID: userID}, mach.DefaultSASTimeout)
-	_, err := mach.NewInRoomSASVerificationWith(cmd.Room.Room.ID, userID, modal, 120*time.Second)
+	roomID := cmd.Room.Room.ID
+	txnID, err := mach.NewInRoomSASVerificationWith(roomID, userID, modal, 120*time.Second)
 	if err != nil {
 		cmd.Reply("Failed to start in-room verification: %v", err)
 		return
+	}
+	modal.Cancel = func() {
+		_ = mach.SendInRoomSASVerificationCancel(roomID, userID, txnID, "Cancelled by user", event.VerificationCancelByUser)
 	}
 	cmd.MainView.ShowModal(modal)
 }

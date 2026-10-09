@@ -95,6 +95,7 @@ func (ui *GomuksUI) Render() {
 }
 
 func (ui *GomuksUI) OnLogin() {
+	ui.mainView.setupVerification()
 	ui.SetView(ViewMain)
 }
 

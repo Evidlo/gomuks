@@ -37,7 +37,9 @@ const helpText = `# General
 /device <user id> <device id>    - Show info about a specific device.
 /unverify <user id> <device id>  - Un-verify a device.
 /blacklist <user id> <device id> - Blacklist a device.
-/verify <user id> - Verify a user with in-room verification. Probably broken.
+/verify [list]                   - List your devices and their trust state.
+/verify <device id>              - Start emoji verification with one of your devices.
+/verify @user:server             - Verify a user with in-room verification. Probably broken.
 /verify-device <user id> <device id> [fingerprint]
     - Verify a device. If the fingerprint is not provided,
       interactive emoji verification will be started.

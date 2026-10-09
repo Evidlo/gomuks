@@ -117,7 +117,7 @@ func NewCommandProcessor(parent *MainView) *CommandProcessor {
 		autocompleters: map[string]CommandAutocompleter{
 			"devices":       autocompleteUser,
 			"device":        autocompleteDevice,
-			"verify":        autocompleteUser,
+			"verify":        autocompleteVerify,
 			"verify-device": autocompleteDevice,
 			"unverify":      autocompleteDevice,
 			"blacklist":     autocompleteDevice,

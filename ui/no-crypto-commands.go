@@ -26,6 +26,12 @@ func autocompleteUser(cmd *CommandAutocomplete) ([]string, string) {
 	return []string{}, ""
 }
 
+func autocompleteVerify(cmd *CommandAutocomplete) ([]string, string) {
+	return []string{}, ""
+}
+
+func (view *MainView) setupVerification() {}
+
 func cmdNoCrypto(cmd *Command) {
 	cmd.Reply("This gomuks was built without encryption support")
 }
